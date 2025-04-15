@@ -4,10 +4,18 @@ from urllib.parse import urlparse
 import ipaddress
 import os
 from datetime import datetime
+import time  # Para pausas entre consultas
 
-# Configuración inicial
+# Configuración segura
+# Carpeta en el mismo directorio del script
 RESULTS_DIR = "dns_analysis_results"
-os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(RESULTS_DIR, exist_ok=True)  # Crear carpeta solo si no existe
+
+# Evitar nombres temporales
+
+
+def safe_filename(domain):
+    return "".join(c for c in domain if c.isalnum() or c in ('.', '-', '_'))
 
 
 def is_ip(address):
@@ -43,6 +51,7 @@ def get_cname(domain, max_depth=5, timeout=5):
             cnames.append(cname)
             current_domain = cname
             depth += 1
+            time.sleep(0.3)  # Pausa entre consultas CNAME
         except dns.resolver.NoAnswer:
             break
         except dns.resolver.NXDOMAIN:
@@ -58,6 +67,7 @@ def get_ips(domain, timeout=5):
     try:
         if is_ip(domain):
             return [domain]
+        time.sleep(0.2)  # Pausa antes de consultar IPs
         return list(set(socket.gethostbyname_ex(domain)[2]))
     except socket.gaierror:
         return ["No IPs (Error de resolución)"]
@@ -69,6 +79,7 @@ def get_ptr(ip, timeout=5):
     try:
         if not is_ip(ip):
             return "No es una IP válida"
+        time.sleep(0.2)  # Pausa antes de consultar PTR
         return socket.gethostbyaddr(ip)[0]
     except socket.herror:
         return "No PTR encontrado"
@@ -99,21 +110,20 @@ def analyze_domain(domain):
 
 
 def save_to_txt(domain, data):
+    safe_domain = safe_filename(domain)[:50]  # Limitar longitud del nombre
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{RESULTS_DIR}/{domain}_analysis_{timestamp}.txt"
+    filename = f"{RESULTS_DIR}/{safe_domain}_analysis_{timestamp}.txt"
+
     with open(filename, 'w', encoding='utf-8') as file:
         file.write(f"Análisis completo de: {domain}\n")
         file.write("=" * 50 + "\n")
-
         file.write("\n[+] Cadena de CNAMEs:\n")
         for i, cname in enumerate(data["CNAME_Chain"], 1):
             file.write(f"Nivel {i}: {cname}\n")
-
         file.write("\n[+] IPs:\n")
         file.write(f"- Dominio original: {', '.join(data['IPs'])}\n")
         if len(data["CNAME_Chain"]) > 1:
             file.write(f"- IPs de CNAMEs: {', '.join(data['All_IPs'])}\n")
-
         file.write("\n[+] Registros PTR:\n")
         for ip, ptr in data["PTRs"].items():
             file.write(f"- {ip} -> {ptr}\n")
@@ -123,9 +133,9 @@ def save_to_txt(domain, data):
 
 def main():
     print("\n" + "=" * 50)
-    print("ANALIZADOR DNS BULK (Escribe 'done' para finalizar)")
+    print("ANALIZADOR DNS SEGURO PARA SOC")
     print("=" * 50 + "\n")
-    print("Pega las URLs o dominios (uno por línea):")
+    print("Pega las URLs o dominios (uno por línea). Escribe 'done' para finalizar:\n")
 
     urls = []
     while True:
@@ -135,11 +145,16 @@ def main():
         if line:
             urls.append(line)
 
-    for url in urls:
+    total = len(urls)
+    print(
+        f"\n[+] Analizando {total} dominios... (Pausas activas para evitar saturacion)")
+
+    for i, url in enumerate(urls, 1):
         domain = extract_domain(url)
-        print(f"\nAnalizando: {domain}...")
+        print(f"\n[{i}/{total}] Analizando: {domain}...")
         data = analyze_domain(domain)
         save_to_txt(domain, data)
+        time.sleep(0.5)  # Pausa entre dominios
 
     print("\n[+] Análisis completado. Todos los resultados están en la carpeta 'dns_analysis_results'.")
 
